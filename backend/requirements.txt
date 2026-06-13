@@ -1,0 +1,47 @@
+# Framework principal
+Django==5.1.4
+djangorestframework==3.15.2
+django-cors-headers==4.4.0
+
+# Base de datos
+psycopg2-binary==2.9.10
+
+# Autenticación JWT
+djangorestframework-simplejwt==5.3.1
+
+# Variables de entorno
+python-decouple==3.8
+
+# Celery (tareas asíncronas)
+celery==5.4.0
+redis==5.2.0
+django-celery-beat==2.7.0
+
+# Emails
+sendgrid==6.11.0
+
+# Storage de archivos (imágenes, logos)
+cloudinary==1.41.0
+django-cloudinary-storage==0.3.0
+
+# Pagos
+stripe==11.1.0
+
+# Utilidades
+Pillow==11.0.0
+django-filter==24.3
+drf-spectacular==0.27.2
+
+# Desarrollo
+ipython==8.29.0
+
+# Testing
+pytest==8.3.4
+pytest-django==4.9.0
+pytest-cov==6.0.0
+factory-boy==3.3.1
+
+# Calidad de código
+flake8==7.1.1
+black==24.10.0
+isort==5.13.2

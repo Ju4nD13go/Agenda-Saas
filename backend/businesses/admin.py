@@ -1,3 +1,10 @@
 from django.contrib import admin
+from .models import Business
 
-# Register your models here.
+
+@admin.register(Business)
+class BusinessAdmin(admin.ModelAdmin):
+    list_display = ('name', 'owner', 'slug', 'is_active', 'created_at')
+    search_fields = ('name', 'slug')
+    prepopulated_fields = {'slug': ('name',)}
+    list_filter = ('is_active',)

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Business
+from .models import Business, Service
 from django.utils.text import slugify
 
 
@@ -18,3 +18,13 @@ class BusinessSerializer(serializers.ModelSerializer):
         validated_data['slug'] = slugify(validated_data['name'])
         validated_data['owner'] = self.context['request'].user
         return super().create(validated_data)
+
+
+class ServiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Service
+        fields = (
+            'id', 'name', 'description', 'duration_minutes',
+            'price', 'category', 'is_active', 'created_at'
+        )
+        read_only_fields = ('created_at',)

@@ -35,3 +35,15 @@ class Service(models.Model):
 
     def __str__(self):
         return f"{self.business.name} - {self.name}"
+    
+class Professional(models.Model):
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='professionals')
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='professional_profile')
+    bio = models.TextField(blank=True)
+    photo_url = models.URLField(blank=True)
+    services = models.ManyToManyField(Service, related_name='professionals', blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.get_full_name()} - {self.business.name}"

@@ -89,7 +89,11 @@ def available_slots(request, business_slug, professional_id, service_id):
     if not date_str:
         return Response({'error': 'Debes enviar el parámetro date (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
 
-    from datetime import datetime, date, time
+    from datetime import datetime
+    import pytz
+
+    bogota_tz = pytz.timezone('America/Bogota')
+
     try:
         selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
@@ -103,8 +107,8 @@ def available_slots(request, business_slug, professional_id, service_id):
 
     duration = timedelta(minutes=service.duration_minutes)
     slots = []
-    current = datetime.combine(selected_date, schedule.start_time)
-    end = datetime.combine(selected_date, schedule.end_time)
+    current = bogota_tz.localize(datetime.combine(selected_date, schedule.start_time))
+    end = bogota_tz.localize(datetime.combine(selected_date, schedule.end_time))
 
     existing_appointments = professional.appointments.filter(
         start_datetime__date=selected_date,
@@ -119,13 +123,17 @@ def available_slots(request, business_slug, professional_id, service_id):
         is_available = True
 
         for apt in existing_appointments:
-            if current < apt.end_datetime.replace(tzinfo=None) and slot_end > apt.start_datetime.replace(tzinfo=None):
+            apt_start = apt.start_datetime.astimezone(bogota_tz)
+            apt_end = apt.end_datetime.astimezone(bogota_tz)
+            if current < apt_end and slot_end > apt_start:
                 is_available = False
                 break
 
         if is_available:
             for block in time_blocks_list:
-                if current < block.end_datetime.replace(tzinfo=None) and slot_end > block.start_datetime.replace(tzinfo=None):
+                block_start = block.start_datetime.astimezone(bogota_tz)
+                block_end = block.end_datetime.astimezone(bogota_tz)
+                if current < block_end and slot_end > block_start:
                     is_available = False
                     break
 
@@ -135,3 +143,75 @@ def available_slots(request, business_slug, professional_id, service_id):
         current += duration
 
     return Response({'date': date_str, 'slots': slots})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_business(request, business_slug):
+    try:
+        business = Business.objects.get(slug=business_slug, is_active=True)
+    except Business.DoesNotExist:
+        return Response({'error': 'Negocio no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    from businesses.serializers import BusinessSerializer, ServiceSerializer, ProfessionalSerializer
+    data = {
+        'business': BusinessSerializer(business).data,
+        'services': ServiceSerializer(business.services.filter(is_active=True), many=True).data,
+        'professionals': ProfessionalSerializer(business.professionals.filter(is_active=True), many=True).data,
+    }
+    return Response(data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def create_appointment(request, business_slug):
+    try:
+        business = Business.objects.get(slug=business_slug, is_active=True)
+    except Business.DoesNotExist:
+        return Response({'error': 'Negocio no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    professional_id = request.data.get('professional_id')
+    service_id = request.data.get('service_id')
+    start_datetime_str = request.data.get('start_datetime')
+    client_name = request.data.get('client_name')
+    client_phone = request.data.get('client_phone')
+
+    if not all([professional_id, service_id, start_datetime_str, client_name, client_phone]):
+        return Response({'error': 'Faltan campos obligatorios: professional_id, service_id, start_datetime, client_name, client_phone'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        professional = business.professionals.get(pk=professional_id, is_active=True)
+        service = business.services.get(pk=service_id, is_active=True)
+    except (Professional.DoesNotExist, Service.DoesNotExist):
+        return Response({'error': 'Profesional o servicio no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    from datetime import datetime
+    try:
+        start_datetime = datetime.fromisoformat(start_datetime_str)
+    except ValueError:
+        return Response({'error': 'Formato de fecha invalido. Usa ISO 8601: YYYY-MM-DDTHH:MM:SS'}, status=status.HTTP_400_BAD_REQUEST)
+
+    end_datetime = start_datetime + timedelta(minutes=service.duration_minutes)
+
+    conflict = professional.appointments.filter(
+        start_datetime__lt=end_datetime,
+        end_datetime__gt=start_datetime,
+        status__in=['confirmed', 'pending']
+    ).exists()
+
+    if conflict:
+        return Response({'error': 'Ese horario ya esta ocupado'}, status=status.HTTP_400_BAD_REQUEST)
+
+    appointment = Appointment.objects.create(
+        business=business,
+        professional=professional,
+        service=service,
+        client_name=client_name,
+        client_phone=client_phone,
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+        status='confirmed'
+    )
+
+    serializer = AppointmentSerializer(appointment)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)

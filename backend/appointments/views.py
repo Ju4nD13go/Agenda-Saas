@@ -324,3 +324,66 @@ def manual_appointment(request):
 
     serializer = AppointmentSerializer(appointment)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reports(request):
+    try:
+        business = Business.objects.get(owner=request.user)
+    except Business.DoesNotExist:
+        return Response({'error': 'No tienes un negocio registrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    from datetime import datetime
+    date_from = request.query_params.get('date_from')
+    date_to = request.query_params.get('date_to')
+
+    appointments = business.appointments.all()
+
+    if date_from:
+        appointments = appointments.filter(start_datetime__date__gte=date_from)
+    if date_to:
+        appointments = appointments.filter(start_datetime__date__lte=date_to)
+
+    total = appointments.count()
+    completed = appointments.filter(status='completed').count()
+    cancelled = appointments.filter(status='cancelled').count()
+    no_show = appointments.filter(status='no_show').count()
+    confirmed = appointments.filter(status='confirmed').count()
+
+    from django.db.models import Count, Sum
+    top_services = appointments.values(
+        'service__name'
+    ).annotate(
+        total=Count('id')
+    ).order_by('-total')[:5]
+
+    top_professionals = appointments.values(
+        'professional__user__first_name',
+        'professional__user__last_name'
+    ).annotate(
+        total=Count('id')
+    ).order_by('-total')[:5]
+
+    total_revenue = appointments.filter(
+        status='completed'
+    ).aggregate(
+        revenue=Sum('service__price')
+    )['revenue'] or 0
+
+    return Response({
+        'summary': {
+            'total': total,
+            'completed': completed,
+            'cancelled': cancelled,
+            'no_show': no_show,
+            'confirmed': confirmed,
+            'no_show_rate': round((no_show / total * 100), 1) if total > 0 else 0,
+            'completion_rate': round((completed / total * 100), 1) if total > 0 else 0,
+        },
+        'revenue': {
+            'total': float(total_revenue),
+            'currency': business.currency,
+        },
+        'top_services': list(top_services),
+        'top_professionals': list(top_professionals),
+    })

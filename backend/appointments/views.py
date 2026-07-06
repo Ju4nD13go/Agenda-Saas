@@ -215,3 +215,112 @@ def create_appointment(request, business_slug):
 
     serializer = AppointmentSerializer(appointment)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def appointment_list(request):
+    try:
+        business = Business.objects.get(owner=request.user)
+    except Business.DoesNotExist:
+        return Response({'error': 'No tienes un negocio registrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    date_str = request.query_params.get('date')
+    status_filter = request.query_params.get('status')
+
+    appointments = business.appointments.all().order_by('start_datetime')
+
+    if date_str:
+        appointments = appointments.filter(start_datetime__date=date_str)
+
+    if status_filter:
+        appointments = appointments.filter(status=status_filter)
+
+    serializer = AppointmentSerializer(appointments, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def appointment_detail(request, pk):
+    try:
+        business = Business.objects.get(owner=request.user)
+        appointment = business.appointments.get(pk=pk)
+    except (Business.DoesNotExist, Appointment.DoesNotExist):
+        return Response({'error': 'No encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = AppointmentSerializer(appointment)
+        return Response(serializer.data)
+
+    elif request.method == 'PUT':
+        new_status = request.data.get('status')
+        notes = request.data.get('notes')
+
+        if new_status:
+            valid_statuses = ['pending', 'confirmed', 'completed', 'cancelled', 'no_show']
+            if new_status not in valid_statuses:
+                return Response({'error': f'Estado inválido. Opciones: {valid_statuses}'}, status=status.HTTP_400_BAD_REQUEST)
+            appointment.status = new_status
+
+        if notes is not None:
+            appointment.notes = notes
+
+        appointment.save()
+        serializer = AppointmentSerializer(appointment)
+        return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def manual_appointment(request):
+    try:
+        business = Business.objects.get(owner=request.user)
+    except Business.DoesNotExist:
+        return Response({'error': 'No tienes un negocio registrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    professional_id = request.data.get('professional_id')
+    service_id = request.data.get('service_id')
+    start_datetime_str = request.data.get('start_datetime')
+    client_name = request.data.get('client_name')
+    client_phone = request.data.get('client_phone')
+
+    if not all([professional_id, service_id, start_datetime_str, client_name, client_phone]):
+        return Response({'error': 'Faltan campos obligatorios'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        professional = business.professionals.get(pk=professional_id, is_active=True)
+        service = business.services.get(pk=service_id, is_active=True)
+    except (Professional.DoesNotExist, Service.DoesNotExist):
+        return Response({'error': 'Profesional o servicio no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    from datetime import datetime
+    try:
+        start_datetime = datetime.fromisoformat(start_datetime_str)
+    except ValueError:
+        return Response({'error': 'Formato de fecha inválido. Usa ISO 8601: YYYY-MM-DDTHH:MM:SS'}, status=status.HTTP_400_BAD_REQUEST)
+
+    end_datetime = start_datetime + timedelta(minutes=service.duration_minutes)
+
+    conflict = professional.appointments.filter(
+        start_datetime__lt=end_datetime,
+        end_datetime__gt=start_datetime,
+        status__in=['confirmed', 'pending']
+    ).exists()
+
+    if conflict:
+        return Response({'error': 'Ese horario ya está ocupado'}, status=status.HTTP_400_BAD_REQUEST)
+
+    appointment = Appointment.objects.create(
+        business=business,
+        professional=professional,
+        service=service,
+        client_name=client_name,
+        client_phone=client_phone,
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+        status='confirmed',
+        notes=request.data.get('notes', '')
+    )
+
+    serializer = AppointmentSerializer(appointment)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)

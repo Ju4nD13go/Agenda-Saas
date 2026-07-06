@@ -8,4 +8,7 @@ urlpatterns = [
     path('public/<slug:business_slug>/professionals/<int:professional_id>/services/<int:service_id>/slots/', views.available_slots, name='available_slots'),
     path('public/<slug:business_slug>/', views.public_business, name='public_business'),
     path('public/<slug:business_slug>/book/', views.create_appointment, name='create_appointment'),
+    path('panel/', views.appointment_list, name='appointment_list'),
+    path('panel/<int:pk>/', views.appointment_detail, name='appointment_detail'),
+    path('panel/manual/', views.manual_appointment, name='manual_appointment'),
 ]

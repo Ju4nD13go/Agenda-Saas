@@ -99,6 +99,10 @@ def available_slots(request, business_slug, professional_id, service_id):
     except ValueError:
         return Response({'error': 'Formato de fecha inválido. Usa YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # No permitir fechas pasadas
+    if selected_date < timezone.now().astimezone(bogota_tz).date():
+        return Response({'error': 'No puedes consultar disponibilidad en fechas pasadas'}, status=status.HTTP_400_BAD_REQUEST)
+
     day_of_week = selected_date.weekday()
     try:
         schedule = professional.schedules.get(day_of_week=day_of_week, is_working=True)
@@ -107,6 +111,7 @@ def available_slots(request, business_slug, professional_id, service_id):
 
     duration = timedelta(minutes=service.duration_minutes)
     slots = []
+    now_bogota = timezone.now().astimezone(bogota_tz)
     current = bogota_tz.localize(datetime.combine(selected_date, schedule.start_time))
     end = bogota_tz.localize(datetime.combine(selected_date, schedule.end_time))
 
@@ -121,6 +126,11 @@ def available_slots(request, business_slug, professional_id, service_id):
     while current + duration <= end:
         slot_end = current + duration
         is_available = True
+
+        # No mostrar slots en el pasado
+        if slot_end <= now_bogota:
+            current += duration
+            continue
 
         for apt in existing_appointments:
             apt_start = apt.start_datetime.astimezone(bogota_tz)
@@ -186,10 +196,18 @@ def create_appointment(request, business_slug):
         return Response({'error': 'Profesional o servicio no encontrado'}, status=status.HTTP_404_NOT_FOUND)
 
     from datetime import datetime
+    import pytz
+    bogota_tz = pytz.timezone('America/Bogota')
+
     try:
         start_datetime = datetime.fromisoformat(start_datetime_str)
     except ValueError:
         return Response({'error': 'Formato de fecha invalido. Usa ISO 8601: YYYY-MM-DDTHH:MM:SS'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validar que la cita no sea en el pasado
+    start_aware = bogota_tz.localize(start_datetime) if start_datetime.tzinfo is None else start_datetime
+    if start_aware <= timezone.now().astimezone(bogota_tz):
+        return Response({'error': 'No puedes agendar una cita en el pasado'}, status=status.HTTP_400_BAD_REQUEST)
 
     end_datetime = start_datetime + timedelta(minutes=service.duration_minutes)
 
@@ -213,8 +231,16 @@ def create_appointment(request, business_slug):
         status='confirmed'
     )
 
+    # Enviar notificación al dueño del negocio
+    try:
+        from notifications.services import send_confirmation
+        send_confirmation(appointment)
+    except Exception:
+        pass
+
     serializer = AppointmentSerializer(appointment)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -294,10 +320,18 @@ def manual_appointment(request):
         return Response({'error': 'Profesional o servicio no encontrado'}, status=status.HTTP_404_NOT_FOUND)
 
     from datetime import datetime
+    import pytz
+    bogota_tz = pytz.timezone('America/Bogota')
+
     try:
         start_datetime = datetime.fromisoformat(start_datetime_str)
     except ValueError:
         return Response({'error': 'Formato de fecha inválido. Usa ISO 8601: YYYY-MM-DDTHH:MM:SS'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validar que la cita no sea en el pasado
+    start_aware = bogota_tz.localize(start_datetime) if start_datetime.tzinfo is None else start_datetime
+    if start_aware <= timezone.now().astimezone(bogota_tz):
+        return Response({'error': 'No puedes agendar una cita en el pasado'}, status=status.HTTP_400_BAD_REQUEST)
 
     end_datetime = start_datetime + timedelta(minutes=service.duration_minutes)
 
@@ -322,8 +356,16 @@ def manual_appointment(request):
         notes=request.data.get('notes', '')
     )
 
+    # Enviar notificación al dueño del negocio
+    try:
+        from notifications.services import send_confirmation
+        send_confirmation(appointment)
+    except Exception:
+        pass
+
     serializer = AppointmentSerializer(appointment)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
